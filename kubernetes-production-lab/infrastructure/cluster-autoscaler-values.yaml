@@ -1,0 +1,22 @@
+autoDiscovery:
+  clusterName: production-lab
+awsRegion: ap-south-1
+rbac:
+  serviceAccount:
+    create: false
+    name: cluster-autoscaler
+extraArgs:
+  balance-similar-node-groups: true
+  skip-nodes-with-system-pods: false
+resources:
+  requests:
+    cpu: 100m
+    memory: 300Mi
+  limits:
+    cpu: 200m
+    memory: 600Mi
+podDisruptionBudget:
+  maxUnavailable: 1
+nodeSelector:
+  workload: application
+

@@ -1,0 +1,7 @@
+.env
+secrets.env
+evidence/*.txt
+evidence/*.png
+evidence/*.jpg
+!evidence/README.md
+frontend/node_modules/
