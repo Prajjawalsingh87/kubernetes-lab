@@ -1,5 +1,0 @@
-secret.yaml
-*.pem
-*.key
-.env
-kubeconfig

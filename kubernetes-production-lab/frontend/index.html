@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kubernetes Production Lab</title>
+
+  <style>
+    body {
+      max-width: 700px;
+      margin: 60px auto;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+    }
+
+    main {
+      padding: 30px;
+      background: white;
+      border-radius: 8px;
+    }
+
+    button {
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+
+    #result {
+      margin-top: 20px;
+      padding: 15px;
+      background: #eef2f5;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Kubernetes Production Lab</h1>
+
+    <p>Frontend is running successfully.</p>
+
+    <button id="check-button">Check Backend and Database</button>
+
+    <pre id="result">Click the button to test the backend.</pre>
+  </main>
+
+  <script>
+    const button = document.getElementById("check-button");
+    const result = document.getElementById("result");
+
+    button.addEventListener("click", async () => {
+      result.textContent = "Loading...";
+
+      try {
+        const response = await fetch("/api/database");
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        result.textContent = `Error: ${error.message}`;
+      }
+    });
+  </script>
+</body>
+</html>
