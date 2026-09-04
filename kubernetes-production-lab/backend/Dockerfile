@@ -1,17 +1,19 @@
-FROM node:22-alpine
+FROM python:3.11-slim
 
-ENV NODE_ENV=production
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY requirements.txt ./
 
-RUN npm ci --omit=dev
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=node:node server.js ./
+COPY main.py ./
 
-USER node
+# Create a non-root user and switch to it
+RUN useradd -m -s /bin/bash appuser
+USER appuser
 
 EXPOSE 8080
 
-CMD ["node", "server.js"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
