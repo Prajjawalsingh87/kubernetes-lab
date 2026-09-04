@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: production
+data:
+  # Application settings
+  APP_ENV: "production"
+  APP_PORT: "8080"
+  LOG_LEVEL: "info"
+
+  # Database settings (non-sensitive)
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "appdb"
+
+  # Frontend settings
+  FRONTEND_PORT: "3000"
+  API_BASE_URL: "http://backend-service:8080"
+
+  # Redis settings (if applicable)
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
