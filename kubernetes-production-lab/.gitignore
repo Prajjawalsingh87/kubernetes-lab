@@ -5,3 +5,4 @@ evidence/*.png
 evidence/*.jpg
 !evidence/README.md
 frontend/node_modules/
+*.pem

@@ -273,7 +273,6 @@ Run one failure at a time, record before/during/after evidence, apply its fix, a
 - Add CloudWatch/Prometheus metrics, centralized logs, alerts, audit logging, and SLOs.
 - Use GitHub Actions/OIDC rather than permanent AWS keys; scan images and manifests; sign images and enforce admission policy.
 - Use topology spread constraints and at least three application nodes for stronger zone-failure tolerance.
-- Use Terraform/CDK for durable infrastructure state. `eksctl` is intentionally used here to keep the weekly lab understandable.
 
 ## 12. Clean up
 
