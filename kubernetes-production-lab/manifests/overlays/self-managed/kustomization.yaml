@@ -17,8 +17,8 @@ secretGenerator:
 
 images:
   - name: FRONTEND_IMAGE
-    newName: AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-lab-frontend
-    newTag: IMAGE_TAG
+    newName: 412664885823.dkr.ecr.us-east-1.amazonaws.com/production-lab-frontend
+    newTag: 2c35ef8
   - name: BACKEND_IMAGE
-    newName: AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-lab-backend
-    newTag: IMAGE_TAG
+    newName: 412664885823.dkr.ecr.us-east-1.amazonaws.com/production-lab-backend
+    newTag: 2c35ef8
