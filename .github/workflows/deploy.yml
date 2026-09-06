@@ -1,0 +1,111 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [setup/initial-architecture]
+    paths:
+      - "kubernetes-production-lab/backend/**"
+      - "kubernetes-production-lab/frontend/**"
+      - "kubernetes-production-lab/manifests/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "412664885823"
+  ECR_REGISTRY: 412664885823.dkr.ecr.us-east-1.amazonaws.com
+  FRONTEND_REPOSITORY: production-lab-frontend
+  BACKEND_REPOSITORY: production-lab-backend
+  NAMESPACE: production-lab
+
+jobs:
+  build:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set immutable image tag
+        id: meta
+        run: echo "image_tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./kubernetes-production-lab/frontend
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPOSITORY }}:${{ steps.meta.outputs.image_tag }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./kubernetes-production-lab/backend
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPOSITORY }}:${{ steps.meta.outputs.image_tag }}
+
+  deploy:
+    name: Deploy to self-managed cluster
+    needs: build
+    # Install a GitHub self-hosted runner on the control-plane with this label.
+    runs-on: [self-hosted, linux, k8s-control-plane]
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refresh ECR pull Secret
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" | \
+            kubectl create secret docker-registry ecr-pull \
+              --namespace "$NAMESPACE" \
+              --docker-server="$ECR_REGISTRY" \
+              --docker-username=AWS \
+              --docker-password-stdin \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Materialize deployment secret
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          umask 077
+          printf 'DB_USER=%s\nDB_PASSWORD=%s\n' \
+            "$DB_USER" "$DB_PASSWORD" \
+            > kubernetes-production-lab/manifests/overlays/self-managed/secrets.env
+
+      - name: Render and apply manifests
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          test -f kubernetes-production-lab/manifests/overlays/self-managed/secrets.env
+          cd kubernetes-production-lab/manifests/overlays/self-managed
+          kustomize edit set image \
+            FRONTEND_IMAGE="$ECR_REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG" \
+            BACKEND_IMAGE="$ECR_REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG"
+          cd -
+          kubectl apply -k kubernetes-production-lab/manifests/overlays/self-managed
+          kubectl rollout status deployment/frontend -n "$NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/backend -n "$NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/postgres -n "$NAMESPACE" --timeout=180s
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods,svc,ingress,hpa,pvc -n "$NAMESPACE"
