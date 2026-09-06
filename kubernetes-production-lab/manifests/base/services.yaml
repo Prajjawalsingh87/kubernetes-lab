@@ -3,8 +3,6 @@ kind: Service
 metadata:
   name: frontend
   namespace: production-lab
-  annotations:
-    alb.ingress.kubernetes.io/healthcheck-path: /health
 spec:
   type: ClusterIP
   selector:
@@ -19,8 +17,6 @@ kind: Service
 metadata:
   name: backend
   namespace: production-lab
-  annotations:
-    alb.ingress.kubernetes.io/healthcheck-path: /api/health/ready
 spec:
   type: ClusterIP
   selector:
@@ -43,4 +39,3 @@ spec:
     - name: postgres
       port: 5432
       targetPort: postgres
-

@@ -1,18 +1,24 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+# Change this one value when deploying the same application to another namespace.
+namespace: production-lab
+
 resources:
   - ../../base
+
 patches:
   - path: ingress-patch.yaml
+
 secretGenerator:
   - name: database-credentials
-    namespace: production-lab
     envs:
       - secrets.env
+
 images:
   - name: FRONTEND_IMAGE
-    newName: AWS_ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/production-lab-frontend
+    newName: AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-lab-frontend
     newTag: IMAGE_TAG
   - name: BACKEND_IMAGE
-    newName: AWS_ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/production-lab-backend
+    newName: AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-lab-backend
     newTag: IMAGE_TAG

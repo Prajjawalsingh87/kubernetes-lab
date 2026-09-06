@@ -3,12 +3,8 @@ kind: Ingress
 metadata:
   name: application
   namespace: production-lab
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
 spec:
-  ingressClassName: alb
+  ingressClassName: nginx
   rules:
     - http:
         paths:
@@ -26,4 +22,3 @@ spec:
                 name: frontend
                 port:
                   number: 80
-

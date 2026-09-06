@@ -1,6 +1,6 @@
 autoDiscovery:
   clusterName: production-lab
-awsRegion: ap-south-1
+awsRegion: us-east-1
 rbac:
   serviceAccount:
     create: false
@@ -19,4 +19,3 @@ podDisruptionBudget:
   maxUnavailable: 1
 nodeSelector:
   workload: application
-

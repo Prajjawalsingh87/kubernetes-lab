@@ -1,31 +1,27 @@
-# Exercise: `/api` traffic is routed to the wrong Service
+# Ingress troubleshooting
 
-## Introduce the failure
+The self-managed cluster uses ingress-nginx exposed through NodePort `30080`.
+The AWS ALB controller is not required.
 
-```bash
-kubectl -n production-lab patch ingress application --type=json \
-  -p='[{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"frontend"},{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/port/number","value":80}]'
-```
+## Intentional failure
 
-## Investigate
+Change `spec.ingressClassName` from `nginx` to a nonexistent class, apply the
+manifest, and observe that the Ingress receives no controller address.
 
 ```bash
 kubectl -n production-lab get ingress application
-kubectl -n production-lab describe ingress application
-kubectl -n kube-system logs deployment/aws-load-balancer-controller --since=10m
-ALB_HOST=$(kubectl -n production-lab get ingress application -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-curl -i "http://${ALB_HOST}/api/database"
+kubectl -n ingress-nginx logs deployment/ingress-nginx-controller
+curl -i http://<worker-public-ip>:30080/
 ```
 
-Expected evidence: the ALB is healthy, but `/api/database` returns frontend content or a frontend 404. Inspecting the Ingress shows the incorrect backend.
+## Fix
 
-## Fix and verify
+Restore `ingressClassName: nginx`, apply the self-managed overlay, and verify
+that the NodePort routes `/` to frontend and `/api` to backend:
 
 ```bash
-kubectl -n production-lab patch ingress application --type=json \
-  -p='[{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"backend"},{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/port/number","value":8080}]'
-curl -i "http://${ALB_HOST}/api/database"
+kubectl apply -k manifests/overlays/self-managed
+kubectl -n production-lab describe ingress application
+curl -i http://<worker-public-ip>:30080/
+curl -i http://<worker-public-ip>:30080/api/health/ready
 ```
-
-Root cause: path order was correct, but the `/api` path referenced the frontend Service.
-
