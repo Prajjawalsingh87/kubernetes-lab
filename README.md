@@ -92,7 +92,7 @@ kubernetes-lab/
 
 ## CI
 
-Every push and PR runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+Every pull request and every push to `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - `ruff` and `py_compile` on the backend
 - `kubectl kustomize` of base and overlay, validated with `kubeconform --strict`

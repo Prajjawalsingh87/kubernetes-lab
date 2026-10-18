@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -33,6 +35,8 @@ jobs:
       KUBECONFORM_VERSION: v0.7.0
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install kubeconform
         run: |
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
@@ -53,6 +57,8 @@ jobs:
         image: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Build
         run: docker build -t production-lab-${{ matrix.image }}:ci ${{ matrix.image }}
 
@@ -62,6 +68,8 @@ jobs:
     needs: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Start stack
         run: docker compose up -d --build
       - name: Wait for backend readiness
