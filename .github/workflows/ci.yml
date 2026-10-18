@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: kubernetes-production-lab
+
+jobs:
+  backend:
+    name: Backend lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Ruff
+        run: pip install ruff && ruff check backend
+      - name: Compile
+        run: python -m py_compile backend/main.py
+
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    env:
+      KUBECONFORM_VERSION: v0.7.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+      - name: Render base and self-managed overlay
+        run: |
+          cp manifests/overlays/self-managed/secrets.env.example manifests/overlays/self-managed/secrets.env
+          kubectl kustomize manifests/base > /tmp/base.yaml
+          kubectl kustomize manifests/overlays/self-managed > /tmp/overlay.yaml
+      - name: Validate schemas
+        run: kubeconform -strict -summary -kubernetes-version 1.30.0 /tmp/base.yaml /tmp/overlay.yaml
+
+  docker:
+    name: Docker build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t production-lab-${{ matrix.image }}:ci ${{ matrix.image }}
+
+  compose-smoke:
+    name: End-to-end smoke test (docker compose)
+    runs-on: ubuntu-latest
+    needs: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: docker compose up -d --build
+      - name: Wait for backend readiness
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/api/health/ready && exit 0
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - name: Frontend proxies to backend and database
+        run: |
+          curl -fsS http://localhost:8081/health
+          curl -fsS http://localhost:8081/api/database | grep -q "Backend and PostgreSQL are working"
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

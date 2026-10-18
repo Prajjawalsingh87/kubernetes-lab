@@ -8,7 +8,13 @@ resources:
   - ../../base
 
 patches:
+  # Explicit target so the patch matches regardless of the namespace set above.
   - path: ingress-patch.yaml
+    target:
+      group: networking.k8s.io
+      version: v1
+      kind: Ingress
+      name: application
 
 secretGenerator:
   - name: database-credentials
