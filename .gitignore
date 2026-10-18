@@ -1,0 +1,19 @@
+# Secrets / local config
+.env
+secrets.env
+*.pem
+kubeconfig*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+
+# Node (frontend is static nginx; never commit dependencies)
+node_modules/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

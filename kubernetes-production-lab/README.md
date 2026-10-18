@@ -11,6 +11,17 @@ PostgreSQL, PDBs, NetworkPolicy, and PostgreSQL node taint/toleration/affinity.
 See [docs/architecture.md](docs/architecture.md) and
 [evidence/README.md](evidence/README.md).
 
+## Run locally first (optional)
+
+The same images run without Kubernetes via Docker Compose; nginx proxies
+`/api` to the backend the way the Ingress does in the cluster:
+
+```bash
+docker compose up --build
+# frontend: http://localhost:8081   backend: http://localhost:8080/api/health/ready
+docker compose down -v
+```
+
 ## Prerequisites
 
 Use one kubeadm control plane and three workers with Calico installed and all
@@ -70,9 +81,20 @@ docker push "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/production-lab-fr
 docker push "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/production-lab-backend:$IMAGE_TAG"
 ```
 
-Edit `manifests/overlays/self-managed/kustomization.yaml`, replacing
-`AWS_ACCOUNT_ID` and `IMAGE_TAG` with the values above. Prefer immutable Git
-tags or image digests for releases.
+Point the overlay at the images you just pushed with the standalone
+`kustomize` CLI (this rewrites the `images:`
+block in `manifests/overlays/self-managed/kustomization.yaml`):
+
+```bash
+cd manifests/overlays/self-managed
+kustomize edit set image \
+  FRONTEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/production-lab-frontend:$IMAGE_TAG" \
+  BACKEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/production-lab-backend:$IMAGE_TAG"
+cd ../../..
+```
+
+Or edit `newName`/`newTag` there by hand. Prefer immutable Git tags or image
+digests for releases.
 
 ## Deploy
 
