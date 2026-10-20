@@ -80,11 +80,18 @@ kubernetes-lab/
     ├── backend/                      # FastAPI service, /metrics, tests/ + Dockerfile
     ├── frontend/                     # static page, nginx.conf + Dockerfile
     ├── local/nginx.conf              # compose-only nginx config (proxies /api)
-    ├── docker-compose.yml            # local stack
+    ├── docker-compose.yml            # local stack (+ `observability` profile: Prometheus, Grafana)
+    ├── dashboards/backend.json       # Grafana dashboard (provisioned locally, importable in-cluster)
+    ├── observability/
+    │   ├── prometheus/               # prometheus.yml, alerts.yml + promtool unit tests
+    │   └── grafana/provisioning/     # datasource + dashboard provider
+    ├── tests/load/smoke.js           # k6 load test (20 VUs, p95 < 500ms, errors < 1%)
     ├── manifests/
     │   ├── base/                     # Namespace, Deployments, Services, Ingress, HPA, PDB, NetworkPolicy, storage
-    │   └── overlays/self-managed/    # namespace, images, Secret generator, ingress patch
+    │   ├── overlays/self-managed/    # namespace, images, Secret generator, ingress patch
+    │   └── monitoring/               # optional PodMonitor + PrometheusRule (needs Prometheus Operator CRDs)
     ├── scripts/check_autoscaling.py  # CI cross-check of HPA / Deployment / PDB
+    ├── scripts/check_prometheusrule.py # CI: PrometheusRule == alerts.yml
     ├── infrastructure/               # Cluster Autoscaler Helm values + IAM policy
     ├── docs/
     │   ├── architecture.md
@@ -102,10 +109,18 @@ Every pull request and every push to `main` runs [`.github/workflows/ci.yml`](.g
   [`scripts/check_autoscaling.py`](kubernetes-production-lab/scripts/check_autoscaling.py),
   which checks that the HPA targets a Deployment with a CPU request and no
   `replicas:`, and that a PDB covers its Pods without blocking all evictions
+- `promtool check rules`, `promtool test rules` (alert unit tests) and
+  `promtool check config` using the `prom/prometheus` image; a check that the
+  `PrometheusRule` manifest matches `alerts.yml`; dashboard JSON validity; and
+  `kubeconform` of `manifests/monitoring` against the CRD schema catalog
 - `docker build` of backend and frontend
-- `docker compose` end-to-end smoke test (frontend → backend → PostgreSQL), including
-  `/metrics` (`database_up 1`, per-route counters) and a check that `/metrics`
-  is not reachable through the frontend
+- `docker compose --profile observability` end-to-end smoke test (frontend → backend → PostgreSQL), including
+  `/metrics` (`database_up 1`, per-route counters), a check that `/metrics`
+  is not reachable through the frontend, Prometheus scraping the backend with the
+  three alert rules loaded, and Grafana serving the provisioned dashboard
+- a k6 load test ([`tests/load/smoke.js`](kubernetes-production-lab/tests/load/smoke.js),
+  `grafana/k6` image) against that stack: ramp to 20 VUs, 30 s hold, fails if
+  p95 ≥ 500 ms or more than 1 % of requests fail
 
 No cloud credentials are needed. Pushing images and deploying to the cluster stay manual.
 
@@ -131,6 +146,43 @@ sum by (route) (rate(http_requests_total[5m]))
 histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))
 min(database_up)
 ```
+
+**Dashboard, alerts and load test (local).** The `observability` Compose profile adds
+Prometheus (scraping `backend:8080/metrics` every 5 s, alert rules loaded) and
+Grafana with the dashboard preloaded:
+
+```bash
+cd kubernetes-production-lab
+docker compose --profile observability up -d --build
+# Grafana    http://localhost:3000  (anonymous viewer; admin / $GRAFANA_ADMIN_PASSWORD, default admin)
+# Prometheus http://localhost:9090  (Status → Targets, Alerts)
+docker run --rm -i --network host -e BASE_URL=http://localhost:8081 \
+  grafana/k6:1.3.0 run - < tests/load/smoke.js      # watch the dashboard move
+docker compose --profile observability down -v
+```
+
+[`dashboards/backend.json`](kubernetes-production-lab/dashboards/backend.json)
+(“Production lab / Backend”) shows requests/s by route and by status, p50/p95/p99
+latency from the histogram (overall and p95 per route), the 5xx error ratio,
+`database_up`, scraped backend targets and – when kube-state-metrics is present –
+HPA current/desired/max replicas. It has a data-source and `job` selector, so it
+can be imported into any Grafana in front of the cluster's Prometheus.
+
+Alert rules ([`observability/prometheus/alerts.yml`](kubernetes-production-lab/observability/prometheus/alerts.yml),
+unit-tested in `alerts_test.yml`):
+
+| Alert | Condition | For | Severity |
+|---|---|---|---|
+| `BackendDown` | `up{job="backend"} == 0` or `database_up == 0` | 2m | critical |
+| `HighErrorRate` | 5xx / all requests > 5 % (5m rate) | 5m | warning |
+| `HighLatency` | p95 of `http_request_duration_seconds` > 500 ms | 10m | warning |
+
+In-cluster with the Prometheus Operator (e.g. kube-prometheus-stack), apply the
+optional add-on: `kubectl apply -k kubernetes-production-lab/manifests/monitoring`
+(a `PodMonitor` that sets `job="backend"` and a `PrometheusRule` with the same
+groups). It is deliberately **not** in the base Kustomization or the overlay, so
+the default deploy does not need the `monitoring.coreos.com` CRDs. Adjust the
+`release:` label if your Prometheus selects rules/monitors differently.
 
 **HorizontalPodAutoscaler** ([`manifests/base/autoscaling.yaml`](kubernetes-production-lab/manifests/base/autoscaling.yaml)):
 `autoscaling/v2`, backend 2–10 replicas on **CPU** utilization 60 % of the

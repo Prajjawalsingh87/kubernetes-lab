@@ -163,6 +163,23 @@ instances are not an ASG. Keep PostgreSQL outside the scalable ASG. Failure
 exercises are in `docs/troubleshooting/`; evidence requirements are in
 `evidence/README.md`.
 
+## Dashboards, alerts and load testing
+
+```bash
+docker compose --profile observability up -d --build   # + Prometheus :9090, Grafana :3000
+docker run --rm -i --network host -e BASE_URL=http://localhost:8081 \
+  grafana/k6:1.3.0 run - < tests/load/smoke.js        # p95 < 500ms, errors < 1%
+docker run --rm -v "$PWD/observability/prometheus:/rules:ro" -w /rules \
+  --entrypoint promtool prom/prometheus:v3.5.0 test rules alerts_test.yml
+```
+
+Grafana opens on the provisioned “Production lab / Backend” dashboard
+(`dashboards/backend.json`). Alert rules live in
+`observability/prometheus/alerts.yml` (BackendDown, HighErrorRate, HighLatency).
+With the Prometheus Operator installed, `kubectl apply -k manifests/monitoring`
+adds a PodMonitor and the matching PrometheusRule; nothing in
+`manifests/base` or the overlay depends on those CRDs.
+
 ## Cleanup
 
 ```bash

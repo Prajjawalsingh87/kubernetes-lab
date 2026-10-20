@@ -1,6 +1,11 @@
 # Local development stack: same images as the cluster, no Kubernetes needed.
 #   docker compose up --build
 #   open http://localhost:8081
+#
+# With Prometheus + Grafana (dashboard and alert rules preloaded):
+#   docker compose --profile observability up --build
+#   Grafana http://localhost:3000 (anonymous viewer; admin/admin to edit)
+#   Prometheus http://localhost:9090
 services:
   postgres:
     image: postgres:16.15-alpine3.24
@@ -39,6 +44,40 @@ services:
       - backend
     ports:
       - "8081:8080"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/rules/alerts.yml:ro
+    depends_on:
+      - backend
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/backend.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
 
 volumes:
   pgdata:

@@ -1,0 +1,119 @@
+# promtool unit tests for alerts.yml:
+#   promtool test rules observability/prometheus/alerts_test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: BackendDown fires when the target is down
+    interval: 1m
+    input_series:
+      - series: 'up{job="backend", instance="backend:8080"}'
+        values: "1 1 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: BackendDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: BackendDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: backend
+              instance: backend:8080
+            exp_annotations:
+              summary: "Backend backend:8080 is down or cannot reach PostgreSQL"
+              description: "Either Prometheus cannot scrape the backend (up == 0) or the backend's SELECT 1 check against PostgreSQL is failing (database_up == 0) for 2 minutes."
+
+  - name: BackendDown fires when PostgreSQL is unreachable
+    interval: 1m
+    input_series:
+      - series: 'up{job="backend", instance="backend:8080"}'
+        values: "1x10"
+      - series: 'database_up{job="backend", instance="backend:8080"}'
+        values: "1 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: BackendDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: backend
+              instance: backend:8080
+            exp_annotations:
+              summary: "Backend backend:8080 is down or cannot reach PostgreSQL"
+              description: "Either Prometheus cannot scrape the backend (up == 0) or the backend's SELECT 1 check against PostgreSQL is failing (database_up == 0) for 2 minutes."
+
+  - name: HighErrorRate fires above 5% 5xx, not below
+    interval: 1m
+    input_series:
+      # 100 req/min, 10 of them 5xx (10%)
+      - series: 'http_requests_total{job="backend", method="GET", route="/api/database", status="200"}'
+        values: "0+90x20"
+      - series: 'http_requests_total{job="backend", method="GET", route="/api/database", status="500"}'
+        values: "0+10x20"
+      # healthy endpoint, 2% errors on its own would not fire
+      - series: 'http_requests_total{job="backend", method="GET", route="/api/health/ready", status="200"}'
+        values: "0+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HighErrorRate
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Backend 5xx ratio above 5%"
+              description: "10% of backend requests returned 5xx over the last 5 minutes."
+
+  - name: HighErrorRate stays quiet at 1% errors
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="backend", method="GET", route="/api/database", status="200"}'
+        values: "0+99x20"
+      - series: 'http_requests_total{job="backend", method="GET", route="/api/database", status="503"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  - name: HighLatency fires when p95 exceeds 500ms for 10m
+    interval: 1m
+    input_series:
+      # Every request lands in the 0.5s-1s bucket -> p95 ~ 0.975s
+      - series: 'http_request_duration_seconds_bucket{job="backend", method="GET", route="/api/database", le="0.5"}'
+        values: "0x30"
+      - series: 'http_request_duration_seconds_bucket{job="backend", method="GET", route="/api/database", le="1"}'
+        values: "0+60x30"
+      - series: 'http_request_duration_seconds_bucket{job="backend", method="GET", route="/api/database", le="+Inf"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: HighLatency
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: HighLatency
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Backend p95 latency above 500ms"
+              description: "Backend p95 latency is 975ms (threshold 500ms) for 10 minutes."
+
+  - name: HighLatency stays quiet for fast requests
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="backend", method="GET", route="/api/database", le="0.05"}'
+        values: "0+60x30"
+      - series: 'http_request_duration_seconds_bucket{job="backend", method="GET", route="/api/database", le="0.5"}'
+        values: "0+60x30"
+      - series: 'http_request_duration_seconds_bucket{job="backend", method="GET", route="/api/database", le="+Inf"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HighLatency
+        exp_alerts: []
