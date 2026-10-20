@@ -14,7 +14,7 @@ defaults:
 
 jobs:
   backend:
-    name: Backend lint
+    name: Backend lint and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +24,13 @@ jobs:
         with:
           python-version: "3.11"
       - name: Ruff
-        run: pip install ruff && ruff check backend
+        run: pip install ruff && ruff check backend scripts
       - name: Compile
         run: python -m py_compile backend/main.py
+      - name: Unit tests (metrics)
+        run: |
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          python -m pytest -q backend/tests
 
   manifests:
     name: Kubernetes manifests
@@ -46,8 +50,14 @@ jobs:
           cp manifests/overlays/self-managed/secrets.env.example manifests/overlays/self-managed/secrets.env
           kubectl kustomize manifests/base > /tmp/base.yaml
           kubectl kustomize manifests/overlays/self-managed > /tmp/overlay.yaml
-      - name: Validate schemas
+      - name: Validate schemas (incl. HPA autoscaling/v2 and PDB policy/v1)
         run: kubeconform -strict -summary -kubernetes-version 1.30.0 /tmp/base.yaml /tmp/overlay.yaml
+      - name: Check HPA / Deployment / PDB fit together
+        run: |
+          pip install pyyaml
+          for f in /tmp/base.yaml /tmp/overlay.yaml; do
+            python scripts/check_autoscaling.py < "$f"
+          done
 
   docker:
     name: Docker build (${{ matrix.image }})
@@ -84,6 +94,16 @@ jobs:
         run: |
           curl -fsS http://localhost:8081/health
           curl -fsS http://localhost:8081/api/database | grep -q "Backend and PostgreSQL are working"
+      - name: Prometheus metrics
+        run: |
+          curl -fsS http://localhost:8080/metrics > /tmp/metrics.txt
+          grep -E '^database_up 1(\.0)?$' /tmp/metrics.txt
+          grep -q 'http_requests_total{method="GET",route="/api/database",status="200"}' /tmp/metrics.txt
+          grep -q 'http_request_duration_seconds_count{method="GET",route="/api/health/ready"}' /tmp/metrics.txt
+          # /metrics must not be reachable through the public frontend/ingress path.
+          if curl -fsS http://localhost:8081/metrics | grep -q http_requests_total; then
+            echo "/metrics is exposed through the frontend" && exit 1
+          fi
       - name: Tear down
         if: always()
         run: docker compose down -v

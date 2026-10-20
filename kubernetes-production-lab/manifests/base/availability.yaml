@@ -1,3 +1,6 @@
+# Voluntary-disruption budgets (node drains, cluster upgrades, Cluster
+# Autoscaler scale-down). The backend HPA keeps minReplicas: 2, so one backend
+# Pod can always be evicted while the other keeps serving.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

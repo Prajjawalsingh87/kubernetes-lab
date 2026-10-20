@@ -135,7 +135,27 @@ curl -i http://<worker-public-ip>:30080/api/health/ready
 Allow TCP 30080 in the EC2 security group. Do not expose backend 8080 or
 PostgreSQL 5432 publicly.
 
-## Autoscaling and troubleshooting
+## Metrics, autoscaling and troubleshooting
+
+The backend exposes Prometheus metrics at `/metrics` on port 8080
+(`http_requests_total`, `http_request_duration_seconds`, `database_up`). It is
+not routed by the Ingress; check it in-cluster:
+
+```bash
+kubectl -n production-lab port-forward deploy/backend 8080:8080 &
+curl -s localhost:8080/metrics | grep -E '^(database_up|http_requests_total)'
+```
+
+The backend HPA (`autoscaling/v2`, CPU 60 % of the 500m request, 2-10 replicas)
+owns the replica count, so the backend Deployment has no `replicas:` field. The
+PDBs keep at least one backend and one frontend Pod during drains. Run the
+tests and manifest checks locally with:
+
+```bash
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt pyyaml
+python -m pytest -q backend/tests
+kubectl kustomize manifests/base | python scripts/check_autoscaling.py
+```
 
 The backend HPA requires Metrics Server. Cluster Autoscaler requires an EC2
 Auto Scaling Group with discovery tags and IAM permissions; manually launched
