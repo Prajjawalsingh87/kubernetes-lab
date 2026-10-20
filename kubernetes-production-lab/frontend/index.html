@@ -1,70 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kubernetes Production Lab</title>
-
-  <style>
-    body {
-      max-width: 700px;
-      margin: 60px auto;
-      padding: 20px;
-      font-family: Arial, sans-serif;
-      background: #f4f6f8;
-    }
-
-    main {
-      padding: 30px;
-      background: white;
-      border-radius: 8px;
-    }
-
-    button {
-      padding: 10px 16px;
-      cursor: pointer;
-    }
-
-    #result {
-      margin-top: 20px;
-      padding: 15px;
-      background: #eef2f5;
-      white-space: pre-wrap;
-    }
-  </style>
-</head>
-
-<body>
-  <main>
-    <h1>Kubernetes Production Lab</h1>
-
-    <p>Frontend is running successfully.</p>
-
-    <button id="check-button">Check Backend and Database</button>
-
-    <pre id="result">Click the button to test the backend.</pre>
-  </main>
-
-  <script>
-    const button = document.getElementById("check-button");
-    const result = document.getElementById("result");
-
-    button.addEventListener("click", async () => {
-      result.textContent = "Loading...";
-
-      try {
-        const response = await fetch("/api/database");
-
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-        result.textContent = JSON.stringify(data, null, 2);
-      } catch (error) {
-        result.textContent = `Error: ${error.message}`;
-      }
-    });
-  </script>
-</body>
-</html>
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kubernetes Lab · Service check</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6f7fb;color:#172033;font:16px/1.6 Inter,system-ui,sans-serif}header{padding:20px 6vw;border-bottom:1px solid #e2e6ef;background:white;font-weight:700;color:#4338ca}main{max-width:800px;margin:8vh auto;padding:24px}section{padding:32px;background:white;border:1px solid #e2e6ef;border-radius:22px}h1{font-size:clamp(28px,5vw,44px);line-height:1.15;letter-spacing:-.04em}p{color:#64748b}small{color:#4338ca;font-weight:700;letter-spacing:.1em;text-transform:uppercase}button{padding:12px 20px;border:0;border-radius:12px;background:#4f46e5;color:white;font:600 15px system-ui;cursor:pointer}button:disabled{opacity:.6;cursor:wait}:focus-visible{outline:3px solid #a5b4fc;outline-offset:4px}pre{background:#f1f5f9;border-radius:12px;padding:20px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}#status{font-weight:600;color:#4338ca}
+</style></head><body><header>Prajjawal / Kubernetes Lab</header><main><section>
+<small>Infrastructure / Service check</small><h1>A clear view of your stack.</h1>
+<p>Check the connection from this frontend to the API and PostgreSQL. Run this dashboard through the lab's nginx ingress or local Docker Compose stack.</p>
+<button id="check-button">Check backend and database</button>
+<p id="status" role="status">Ready to check.</p><pre id="result">No check has been run yet.</pre>
+</section></main><script>
+const button=document.getElementById("check-button"), result=document.getElementById("result"), status=document.getElementById("status");
+button.addEventListener("click",async()=>{
+ button.disabled=true;status.textContent="Checking services…";
+ const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),10000), started=performance.now();
+ try{
+  const response=await fetch("/api/database",{signal:controller.signal,cache:"no-store"});
+  if(!response.ok)throw new Error("API returned HTTP "+response.status);
+  const data=await response.json();result.textContent=JSON.stringify(data,null,2);
+  status.textContent="API responded in "+Math.round(performance.now()-started)+" ms · "+new Date().toLocaleTimeString()+". Check the database result below.";
+ }catch(error){status.textContent="Service check failed.";result.textContent=error.name==="AbortError"?"The API did not respond within 10 seconds.":error.message+"\nCheck the ingress, API service and database connection.";}
+ finally{clearTimeout(timeout);button.disabled=false;}
+});
+</script></body></html>

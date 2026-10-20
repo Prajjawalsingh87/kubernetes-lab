@@ -119,3 +119,14 @@ No cloud credentials are needed. Pushing images and deploying to the cluster sta
 - `secrets.env` is git-ignored. Only `secrets.env.example` (placeholder values) is committed.
 - All containers run as non-root, with read-only root FS on the backend and all capabilities dropped.
 - Only the ingress NodePort is public; backend and PostgreSQL are `ClusterIP` only.
+
+
+## October 2026 improvements
+
+The frontend now shows a responsive service dashboard with request duration, check time, a ten-second timeout and clear failure feedback. Duplicate checks are disabled while a request is in progress. The dashboard displays actual API/database responses.
+
+
+The UI depends on the lab's `/api/database` ingress route. Run it with the existing
+Docker Compose or Kubernetes setup; a standalone Vercel deployment would not
+include the cluster, database or ingress. No live cluster changes are required
+for this UI update.
