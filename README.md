@@ -29,7 +29,7 @@ flowchart LR
 | Component | Image | Notes |
 |---|---|---|
 | Frontend | `nginxinc/nginx-unprivileged:1.27.5-alpine` | Static `index.html`, `/health` endpoint, UID 101 |
-| Backend | `python:3.11.13-slim-bookworm` | FastAPI + asyncpg, `/api/health/live`, `/api/health/ready`, `/api/database`, UID 1000 |
+| Backend | `python:3.11.13-slim-bookworm` | FastAPI + asyncpg, `/api/health/live`, `/api/health/ready`, `/api/database`, Prometheus `/metrics` (cluster-internal), UID 1000 |
 | Database | `postgres:16.15-alpine3.24` | `Recreate` strategy, retained encrypted EBS volume, UID 70 |
 
 More detail: [docs/architecture.md](kubernetes-production-lab/docs/architecture.md).
@@ -46,6 +46,7 @@ docker compose up --build
 
 - Frontend: <http://localhost:8081> (click **Check Backend and Database**)
 - Backend: <http://localhost:8080/api/health/ready>, <http://localhost:8080/api/database>
+- Metrics: <http://localhost:8080/metrics> (Prometheus text format)
 
 Stop and delete the local volume with `docker compose down -v`.
 
@@ -76,13 +77,14 @@ Exact commands for each step are in the
 kubernetes-lab/
 ├── .github/workflows/ci.yml          # lint, manifest validation, docker builds, compose smoke test
 └── kubernetes-production-lab/
-    ├── backend/                      # FastAPI service + Dockerfile
+    ├── backend/                      # FastAPI service, /metrics, tests/ + Dockerfile
     ├── frontend/                     # static page, nginx.conf + Dockerfile
     ├── local/nginx.conf              # compose-only nginx config (proxies /api)
     ├── docker-compose.yml            # local stack
     ├── manifests/
     │   ├── base/                     # Namespace, Deployments, Services, Ingress, HPA, PDB, NetworkPolicy, storage
     │   └── overlays/self-managed/    # namespace, images, Secret generator, ingress patch
+    ├── scripts/check_autoscaling.py  # CI cross-check of HPA / Deployment / PDB
     ├── infrastructure/               # Cluster Autoscaler Helm values + IAM policy
     ├── docs/
     │   ├── architecture.md
@@ -94,12 +96,61 @@ kubernetes-lab/
 
 Every pull request and every push to `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
-- `ruff` and `py_compile` on the backend
+- `ruff`, `py_compile` and `pytest` (metrics unit tests) on the backend
 - `kubectl kustomize` of base and overlay, validated with `kubeconform --strict`
+  (including the HPA and PDBs), plus
+  [`scripts/check_autoscaling.py`](kubernetes-production-lab/scripts/check_autoscaling.py),
+  which checks that the HPA targets a Deployment with a CPU request and no
+  `replicas:`, and that a PDB covers its Pods without blocking all evictions
 - `docker build` of backend and frontend
-- `docker compose` end-to-end smoke test (frontend → backend → PostgreSQL)
+- `docker compose` end-to-end smoke test (frontend → backend → PostgreSQL), including
+  `/metrics` (`database_up 1`, per-route counters) and a check that `/metrics`
+  is not reachable through the frontend
 
 No cloud credentials are needed. Pushing images and deploying to the cluster stay manual.
+
+## Observability and autoscaling
+
+**Prometheus metrics.** The backend serves `GET /metrics` (via `prometheus_client`):
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `http_requests_total` | counter | `method`, `route`, `status` | Requests handled |
+| `http_request_duration_seconds` | histogram | `method`, `route` | Request latency (5 ms – 10 s buckets) |
+| `database_up` | gauge | – | `1` if `SELECT 1` against PostgreSQL succeeded on the last scrape/readiness check, else `0` |
+
+`route` is the FastAPI route *template* (e.g. `/api/database`), never the raw
+URL, and every unknown path is reported as `route="unmatched"`, so label
+cardinality stays bounded. Standard `python_*`/`process_*` metrics are included too.
+`/metrics` is not under `/api`, so neither the Ingress nor the local nginx exposes
+it publicly; the backend Pod template carries `prometheus.io/scrape|port|path`
+annotations for annotation-based in-cluster scraping. Example queries:
+
+```promql
+sum by (route) (rate(http_requests_total[5m]))
+histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))
+min(database_up)
+```
+
+**HorizontalPodAutoscaler** ([`manifests/base/autoscaling.yaml`](kubernetes-production-lab/manifests/base/autoscaling.yaml)):
+`autoscaling/v2`, backend 2–10 replicas on **CPU** utilization 60 % of the
+500m request, fast scale-up and a 5-minute scale-down stabilization. The backend
+Deployment deliberately has **no `replicas:`** so `kubectl apply` never resets
+the HPA's decision. Needs Metrics Server (`kubectl -n production-lab get hpa backend`).
+
+> Upgrading an existing cluster: because `replicas` was removed from the
+> Deployment, the first `kubectl apply` after this change drops the backend to
+> 1 replica until the HPA (min 2) scales it back up within ~15 s. To avoid even
+> that blip, run `kubectl -n production-lab apply edit-last-applied deployment/backend`
+> and delete the `replicas` line before applying.
+
+**PodDisruptionBudgets** ([`manifests/base/availability.yaml`](kubernetes-production-lab/manifests/base/availability.yaml)):
+`minAvailable: 1` for backend and frontend, so node drains and Cluster Autoscaler
+scale-downs evict at most one Pod at a time while still being able to proceed
+(HPA `minReplicas: 2` > `minAvailable`).
+
+All three are part of the base Kustomization and therefore of the
+`self-managed` overlay.
 
 ## Troubleshooting
 

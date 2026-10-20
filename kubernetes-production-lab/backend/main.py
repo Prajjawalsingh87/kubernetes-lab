@@ -1,10 +1,18 @@
 import logging
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 
 import asyncpg
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 REQUIRED_VARIABLES = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]
 
@@ -21,6 +29,22 @@ if missing_variables:
 
 # Global connection pool, created on startup.
 db_pool: asyncpg.Pool | None = None
+
+# Prometheus metrics. Labels use the route *template* (e.g. "/api/health/ready"),
+# never the raw URL path, so label cardinality stays bounded.
+REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "HTTP requests handled by the backend.",
+    ["method", "route", "status"],
+)
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds.",
+    ["method", "route"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+DB_UP = Gauge("database_up", "1 if the last PostgreSQL check succeeded, else 0.")
+DB_CHECK_TIMEOUT_SECONDS = 2.0
 
 
 @asynccontextmanager
@@ -45,6 +69,49 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+def route_template(request: Request) -> str:
+    """Matched route path template, or a fixed label for unmatched paths (404s)."""
+    route = request.scope.get("route")
+    return getattr(route, "path", None) or "unmatched"
+
+
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        route = route_template(request)
+        REQUEST_LATENCY.labels(request.method, route).observe(time.perf_counter() - start)
+        REQUEST_COUNT.labels(request.method, route, str(status)).inc()
+
+
+async def check_database() -> bool:
+    """Run SELECT 1 against the pool and record the result in database_up."""
+    if db_pool is None:
+        DB_UP.set(0)
+        return False
+    try:
+        async with db_pool.acquire(timeout=DB_CHECK_TIMEOUT_SECONDS) as connection:
+            await connection.execute("SELECT 1", timeout=DB_CHECK_TIMEOUT_SECONDS)
+    except Exception:  # includes TimeoutError
+        logger.warning("Database check failed", exc_info=True)
+        DB_UP.set(0)
+        return False
+    DB_UP.set(1)
+    return True
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    # Not under /api, so the Ingress never exposes it; scrape it in-cluster.
+    await check_database()
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/api/health/live")
 async def health_live():
     return {"status": "alive"}
@@ -52,14 +119,7 @@ async def health_live():
 
 @app.get("/api/health/ready")
 async def health_ready(response: Response):
-    if db_pool is None:
-        response.status_code = 503
-        return {"status": "not-ready"}
-    try:
-        async with db_pool.acquire() as connection:
-            await connection.execute("SELECT 1")
-    except Exception:
-        logger.warning("Readiness check failed", exc_info=True)
+    if not await check_database():
         response.status_code = 503
         return {"status": "not-ready"}
     return {"status": "ready"}

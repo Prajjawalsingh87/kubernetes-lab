@@ -1,3 +1,7 @@
+# CPU-based autoscaling for the backend. Utilization is measured against the
+# container's CPU *request* (500m in backend-deployment.yaml), so the request
+# must stay set. Requires Metrics Server. The HPA owns the replica count; the
+# Deployment deliberately has no `replicas:` field.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -34,10 +38,4 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 75
 
