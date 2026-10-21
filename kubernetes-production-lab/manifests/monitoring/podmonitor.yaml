@@ -1,0 +1,21 @@
+# Scrapes the backend Pods' `http` container port at /metrics.
+# jobLabel copies the Pod's app.kubernetes.io/name label into `job`, so the
+# series carry job="backend" - the label the alert rules and the Grafana
+# dashboard select on (same as the local docker compose Prometheus).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: backend
+  namespace: production-lab
+  labels:
+    app.kubernetes.io/name: backend
+    release: kube-prometheus-stack
+spec:
+  jobLabel: app.kubernetes.io/name
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

@@ -1,0 +1,44 @@
+# Alert rules for the production-lab backend.
+# Source of truth: keep manifests/monitoring/prometheusrule.yaml in sync
+# (CI checks this with scripts/check_prometheusrule.py).
+# Validate:  promtool check rules observability/prometheus/alerts.yml
+# Unit test: promtool test rules observability/prometheus/alerts_test.yml
+groups:
+  - name: production-lab-backend
+    rules:
+      - alert: BackendDown
+        # Scrape target down, or the backend reports PostgreSQL unreachable.
+        expr: up{job="backend"} == 0 or database_up{job="backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend {{ $labels.instance }} is down or cannot reach PostgreSQL"
+          description: >-
+            Either Prometheus cannot scrape the backend (up == 0) or the backend's
+            SELECT 1 check against PostgreSQL is failing (database_up == 0) for 2 minutes.
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="backend", status=~"5.."}[5m]))
+            /
+          sum(rate(http_requests_total{job="backend"}[5m]))
+            > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend 5xx ratio above 5%"
+          description: "{{ $value | humanizePercentage }} of backend requests returned 5xx over the last 5 minutes."
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="backend"}[5m]))
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend p95 latency above 500ms"
+          description: "Backend p95 latency is {{ $value | humanizeDuration }} (threshold 500ms) for 10 minutes."
